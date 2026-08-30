@@ -3,12 +3,13 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "strict": false,
     "outDir": "./dist/server",
-    "rootDir": "./server",
-    "types": ["node"]
+    "rootDir": ".",
+    "skipLibCheck": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true
   },
   "include": ["server/**/*"]
 }
