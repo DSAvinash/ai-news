@@ -425,16 +425,40 @@ export function initDatabase() {
 
     CREATE TABLE IF NOT EXISTS catalog_sync_runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sync_type TEXT CHECK(sync_type IN ('MANUAL', 'AUTOMATIC', 'FULL', 'INCREMENTAL')) DEFAULT 'MANUAL',
+      status TEXT CHECK(status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'PARTIAL', 'FAILED', 'CANCELLED')) DEFAULT 'RUNNING',
       started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       completed_at DATETIME,
-      status TEXT CHECK(status IN ('RUNNING', 'COMPLETED', 'PARTIAL', 'FAILED')) DEFAULT 'RUNNING',
+      triggered_by TEXT DEFAULT 'ADMIN',
+      resources_discovered INTEGER DEFAULT 0,
       resources_checked INTEGER DEFAULT 0,
       new_count INTEGER DEFAULT 0,
       updated_count INTEGER DEFAULT 0,
+      unchanged_count INTEGER DEFAULT 0,
       unavailable_count INTEGER DEFAULT 0,
+      verification_failed_count INTEGER DEFAULT 0,
       duplicate_count INTEGER DEFAULT 0,
       error_count INTEGER DEFAULT 0,
-      details_json TEXT
+      duration_ms INTEGER DEFAULT 0,
+      error_summary TEXT,
+      details_json TEXT,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS catalog_sync_sources (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sync_run_id INTEGER NOT NULL REFERENCES catalog_sync_runs(id) ON DELETE CASCADE,
+      source_name TEXT NOT NULL,
+      source_url TEXT NOT NULL,
+      status TEXT CHECK(status IN ('HEALTHY', 'PARTIAL', 'FAILED', 'SKIPPED')) DEFAULT 'HEALTHY',
+      started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      completed_at DATETIME,
+      resources_found INTEGER DEFAULT 0,
+      new_count INTEGER DEFAULT 0,
+      updated_count INTEGER DEFAULT 0,
+      error_count INTEGER DEFAULT 0,
+      error_message TEXT,
+      response_time_ms INTEGER DEFAULT 0
     );
   `);
 
@@ -468,11 +492,22 @@ export function initDatabase() {
     "ALTER TABLE google_skills_catalog ADD COLUMN source_id INTEGER",
     "ALTER TABLE google_skills_catalog ADD COLUMN created_at DATETIME",
     "ALTER TABLE google_skills_catalog ADD COLUMN updated_at DATETIME",
+    "ALTER TABLE google_skills_catalog ADD COLUMN first_discovered_at DATETIME",
+    "ALTER TABLE google_skills_catalog ADD COLUMN last_verified_at DATETIME",
+    "ALTER TABLE google_skills_catalog ADD COLUMN consecutive_failures INTEGER DEFAULT 0",
     "ALTER TABLE user_skills ADD COLUMN proficiency_level TEXT DEFAULT 'BEGINNER'",
     "ALTER TABLE user_skills ADD COLUMN confidence REAL DEFAULT 0.8",
     "ALTER TABLE user_skills ADD COLUMN source TEXT DEFAULT 'USER_SELECTED'",
     "ALTER TABLE user_skills ADD COLUMN last_assessed_at DATETIME",
-    "ALTER TABLE user_skills ADD COLUMN updated_at DATETIME"
+    "ALTER TABLE user_skills ADD COLUMN updated_at DATETIME",
+    "ALTER TABLE catalog_sync_runs ADD COLUMN sync_type TEXT DEFAULT 'MANUAL'",
+    "ALTER TABLE catalog_sync_runs ADD COLUMN triggered_by TEXT DEFAULT 'ADMIN'",
+    "ALTER TABLE catalog_sync_runs ADD COLUMN resources_discovered INTEGER DEFAULT 0",
+    "ALTER TABLE catalog_sync_runs ADD COLUMN unchanged_count INTEGER DEFAULT 0",
+    "ALTER TABLE catalog_sync_runs ADD COLUMN verification_failed_count INTEGER DEFAULT 0",
+    "ALTER TABLE catalog_sync_runs ADD COLUMN duration_ms INTEGER DEFAULT 0",
+    "ALTER TABLE catalog_sync_runs ADD COLUMN error_summary TEXT",
+    "ALTER TABLE catalog_sync_runs ADD COLUMN created_at DATETIME"
   ];
 
   // Ensure updated_at column exists for google_skills_catalog (migration safety)

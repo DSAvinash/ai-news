@@ -6,6 +6,7 @@ import { calculateTopicMomentum } from '../ingestion/topicEngine.js';
 import { validateOfficialGoogleUrl } from '../integrations/google/validator.js';
 import { canonicalizeUrl, computeContentHash } from '../integrations/google/normalizer.js';
 import { getStreamMetrics } from '../notifications/eventStream.js';
+import { runGoogleCatalogSync, getActiveSyncStatus } from '../integrations/google/discovery.js';
 
 let passed = 0;
 let failed = 0;
@@ -54,6 +55,15 @@ async function runSuite() {
   // Gap Analysis Verification
   const gaps = analyzeUserSkillGaps('default_user');
   assert(Array.isArray(gaps), 'User skill gaps computed', `Gaps count: ${gaps.length}`);
+
+  // Catalog Sync Engine v2.0 Verification (PRD §44 AC-01 to AC-15)
+  const syncStatus = getActiveSyncStatus();
+  assert(typeof syncStatus.is_running === 'boolean', 'Sync status reporter active');
+
+  const syncResult = await runGoogleCatalogSync({ syncType: 'INCREMENTAL', triggeredBy: 'SMOKE_TEST' });
+  assert(syncResult.status === 'COMPLETED' || syncResult.status === 'PARTIAL', 'Catalog Sync run executed with valid status');
+  assert(typeof syncResult.resources_checked === 'number' && syncResult.resources_checked > 0, 'Catalog Sync checked official resources');
+  assert(Array.isArray(syncResult.source_reports) && syncResult.source_reports.length > 0, 'Catalog Sync produced source-level reports');
 
   // 3. Skill Radar & Topic Engine
   console.log('\n📊 3. Skill Radar & Topic Engines:');

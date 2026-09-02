@@ -62,6 +62,23 @@ export const GoogleSkillsView: React.FC = () => {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isGapRadarOpen, setIsGapRadarOpen] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const fetchSyncStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/google-skills/admin/sync/status');
+      const data = await res.json();
+      if (data.success && data.data) {
+        setIsSyncing(data.data.is_running);
+        if (data.data.last_sync?.completed_at || data.data.last_sync?.started_at) {
+          setLastSyncTime(data.data.last_sync.completed_at || data.data.last_sync.started_at);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch sync status:', err);
+    }
+  }, []);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -113,7 +130,8 @@ export const GoogleSkillsView: React.FC = () => {
   useEffect(() => {
     fetchStats();
     fetchRecommendations();
-  }, [fetchStats, fetchRecommendations]);
+    fetchSyncStatus();
+  }, [fetchStats, fetchRecommendations, fetchSyncStatus]);
 
   useEffect(() => {
     fetchCatalog();
@@ -177,15 +195,34 @@ export const GoogleSkillsView: React.FC = () => {
             <p className="text-sm text-on-surface-variant max-w-3xl leading-relaxed">
               Continuously discovers, validates, and synchronizes official Google learning resources (Google DeepMind, Vertex AI, Gemini). Maps real-time AI industry momentum to personal skill gaps and guided learning paths.
             </p>
+            <div className="flex items-center gap-3 pt-1 text-xs text-on-surface-variant">
+              <span className="flex items-center gap-1.5 font-medium">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                Last synchronized: {lastSyncTime ? new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently'}
+              </span>
+              <span>•</span>
+              <span className="font-semibold text-primary">
+                {stats?.verified_skills || 0} verified official resources
+              </span>
+            </div>
           </div>
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2.5">
             <button
-              onClick={() => setIsGapRadarOpen(true)}
+              onClick={() => setIsAdminModalOpen(true)}
               className="px-3.5 py-2 bg-primary text-white hover:bg-primary/90 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
             >
-              <span className="material-symbols-outlined text-sm">radar</span>
+              <span className={`material-symbols-outlined text-sm ${isSyncing ? 'animate-spin' : ''}`}>
+                sync
+              </span>
+              {isSyncing ? 'Syncing Catalog...' : '🔄 Sync Google Skills'}
+            </button>
+            <button
+              onClick={() => setIsGapRadarOpen(true)}
+              className="px-3.5 py-2 bg-surface-container-high hover:bg-surface-container text-on-surface rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors border border-outline-variant/60"
+            >
+              <span className="material-symbols-outlined text-sm text-primary">radar</span>
               Skill Gap Radar
             </button>
             <button
@@ -194,13 +231,6 @@ export const GoogleSkillsView: React.FC = () => {
             >
               <span className="material-symbols-outlined text-sm text-primary">psychology</span>
               My Skill Profile
-            </button>
-            <button
-              onClick={() => setIsAdminModalOpen(true)}
-              className="px-3.5 py-2 bg-surface-container-high hover:bg-surface-container text-on-surface rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors border border-outline-variant/60"
-            >
-              <span className="material-symbols-outlined text-sm text-primary">settings_suggest</span>
-              Sync & Audit
             </button>
           </div>
         </div>

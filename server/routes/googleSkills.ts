@@ -1,7 +1,7 @@
 // server/routes/googleSkills.ts
 import { Router } from 'express';
 import { db } from '../database/db.js';
-import { runGoogleCatalogSync } from '../integrations/google/discovery.js';
+import { runGoogleCatalogSync, getActiveSyncStatus, cancelGoogleCatalogSync } from '../integrations/google/discovery.js';
 import {
   getPersonalizedRecommendations,
   getUserSkillProfile,
@@ -414,23 +414,132 @@ router.put('/users/me/skill-profile', (req, res) => {
   }
 });
 
-// POST /api/v1/admin/google-skills/sync — Manual Catalog Sync Trigger (PRD §49 & §59)
-router.post('/admin/sync', async (req, res) => {
+// GET /api/google-skills/admin/sync/status — Live sync progress or last completed run (PRD §24)
+router.get('/admin/sync/status', (req, res) => {
   try {
-    const result = await runGoogleCatalogSync();
-    res.json({ success: true, ...result });
+    const status = getActiveSyncStatus();
+    res.json({ success: true, data: status });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// GET /api/v1/admin/google-skills/sync-history — Audit Logs (PRD §50 & §63)
+// POST /api/google-skills/admin/sync — Standard / Incremental Catalog Sync (PRD §4.1, §24)
+router.post('/admin/sync', async (req, res) => {
+  try {
+    const triggeredBy = (req.body?.triggered_by as string) || 'ADMIN';
+    const result = await runGoogleCatalogSync({ syncType: 'INCREMENTAL', triggeredBy });
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    const isConflict = err.message?.includes('already in progress');
+    res.status(isConflict ? 409 : 500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/google-skills/admin/sync/full — Force Full Catalog Re-verification (PRD §4.3, §24)
+router.post('/admin/sync/full', async (req, res) => {
+  try {
+    const triggeredBy = (req.body?.triggered_by as string) || 'ADMIN';
+    const result = await runGoogleCatalogSync({ syncType: 'FULL', triggeredBy });
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    const isConflict = err.message?.includes('already in progress');
+    res.status(isConflict ? 409 : 500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/google-skills/admin/sync/:syncId — Specific sync job status (PRD §24)
+router.get('/admin/sync/:syncId', (req, res) => {
+  try {
+    const syncId = parseInt(req.params.syncId, 10);
+    const run = db.prepare('SELECT * FROM catalog_sync_runs WHERE id = ?').get(syncId) as any;
+    if (!run) return res.status(404).json({ success: false, error: 'Sync run not found' });
+
+    const sources = db.prepare('SELECT * FROM catalog_sync_sources WHERE sync_run_id = ?').all(syncId) as any[];
+
+    res.json({
+      success: true,
+      data: {
+        ...run,
+        source_reports: sources
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/google-skills/admin/sync/:syncId/results — Detailed "What Changed?" Diff (PRD §24, §33)
+router.get('/admin/sync/:syncId/results', (req, res) => {
+  try {
+    const syncId = parseInt(req.params.syncId, 10);
+    const run = db.prepare('SELECT * FROM catalog_sync_runs WHERE id = ?').get(syncId) as any;
+    if (!run) return res.status(404).json({ success: false, error: 'Sync run not found' });
+
+    let parsedDetails: any = {};
+    try {
+      parsedDetails = JSON.parse(run.details_json || '{}');
+    } catch (e) {}
+
+    const sources = db.prepare('SELECT * FROM catalog_sync_sources WHERE sync_run_id = ?').all(syncId) as any[];
+
+    res.json({
+      success: true,
+      data: {
+        sync_id: run.id,
+        sync_type: run.sync_type,
+        status: run.status,
+        started_at: run.started_at,
+        completed_at: run.completed_at,
+        duration_ms: run.duration_ms,
+        metrics: {
+          discovered: run.resources_discovered,
+          checked: run.resources_checked,
+          new: run.new_count,
+          updated: run.updated_count,
+          unchanged: run.unchanged_count,
+          unavailable: run.unavailable_count,
+          verification_failed: run.verification_failed_count,
+          duplicates: run.duplicate_count,
+          errors: run.error_count
+        },
+        source_reports: sources,
+        what_changed: parsedDetails.what_changed || {
+          new_resources: [],
+          updated_resources: [],
+          unavailable_resources: []
+        }
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/google-skills/admin/sync/:syncId/cancel — Cancel active sync (PRD §24)
+router.post('/admin/sync/:syncId/cancel', (req, res) => {
+  try {
+    const syncId = parseInt(req.params.syncId, 10);
+    const cancelled = cancelGoogleCatalogSync(syncId);
+    if (!cancelled) {
+      return res.status(400).json({ success: false, error: 'Sync run is not actively running or not found' });
+    }
+    res.json({ success: true, message: `Sync #${syncId} cancellation requested` });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/google-skills/admin/sync-history — Audit Logs & Past Runs (PRD §24, §37)
 router.get('/admin/sync-history', (req, res) => {
   try {
     const history = db.prepare(`
-      SELECT * FROM catalog_sync_runs
-      ORDER BY started_at DESC
-      LIMIT 15
+      SELECT 
+        csr.*,
+        (SELECT COUNT(*) FROM catalog_sync_sources css WHERE css.sync_run_id = csr.id) as sources_count
+      FROM catalog_sync_runs csr
+      ORDER BY csr.started_at DESC
+      LIMIT 20
     `).all() as any[];
 
     res.json({ success: true, data: history });
@@ -440,3 +549,4 @@ router.get('/admin/sync-history', (req, res) => {
 });
 
 export const googleSkillsRouter = router;
+
