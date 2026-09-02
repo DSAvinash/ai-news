@@ -64,6 +64,7 @@ export const GoogleSkillsView: React.FC = () => {
   const [isGapRadarOpen, setIsGapRadarOpen] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncToast, setSyncToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
   const fetchSyncStatus = useCallback(async () => {
     try {
@@ -126,6 +127,50 @@ export const GoogleSkillsView: React.FC = () => {
       setLoading(false);
     }
   }, [activeTab, search, difficulty, resourceType]);
+
+  const handleRefreshScreen = async () => {
+    setLoading(true);
+    await Promise.all([
+      fetchStats(),
+      fetchRecommendations(),
+      fetchCatalog(),
+      fetchSyncStatus()
+    ]);
+    setSyncToast({ type: 'info', message: '✓ Screen data refreshed.' });
+    setTimeout(() => setSyncToast(null), 3000);
+  };
+
+  const handleDirectSync = async () => {
+    setIsSyncing(true);
+    setSyncToast({ type: 'info', message: '⟳ Syncing with official Google Skills catalog...' });
+    try {
+      const res = await fetch('/api/google-skills/admin/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ triggered_by: 'USER' })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSyncToast({
+          type: 'success',
+          message: `✓ Sync complete: +${data.new_count || 0} New, ↻${data.updated_count || 0} Updated, ✓${data.unchanged_count || data.resources_checked || 0} Verified.`
+        });
+        await Promise.all([
+          fetchStats(),
+          fetchRecommendations(),
+          fetchCatalog(),
+          fetchSyncStatus()
+        ]);
+      } else {
+        setSyncToast({ type: 'error', message: `Sync warning: ${data.error}` });
+      }
+    } catch (e: any) {
+      setSyncToast({ type: 'error', message: `Sync failed: ${e.message}` });
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => setSyncToast(null), 6000);
+    }
+  };
 
   useEffect(() => {
     fetchStats();
@@ -208,32 +253,72 @@ export const GoogleSkillsView: React.FC = () => {
           </div>
 
           {/* Action Buttons */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
             <button
-              onClick={() => setIsAdminModalOpen(true)}
-              className="px-3.5 py-2 bg-primary text-white hover:bg-primary/90 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
+              onClick={handleDirectSync}
+              disabled={isSyncing}
+              className="px-3.5 py-2 bg-primary text-white hover:bg-primary/90 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-60"
+              title="Crawl official Google feeds and synchronize database"
             >
               <span className={`material-symbols-outlined text-sm ${isSyncing ? 'animate-spin' : ''}`}>
                 sync
               </span>
               {isSyncing ? 'Syncing Catalog...' : '🔄 Sync Google Skills'}
             </button>
+
+            <button
+              onClick={handleRefreshScreen}
+              className="px-3 py-2 bg-surface-container-high hover:bg-surface-container text-on-surface rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors border border-outline-variant/60"
+              title="Refresh screen view and statistics"
+            >
+              <span className="material-symbols-outlined text-sm">refresh</span>
+              Refresh View
+            </button>
+
+            <button
+              onClick={() => setIsAdminModalOpen(true)}
+              className="px-3 py-2 bg-surface-container-high hover:bg-surface-container text-on-surface rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors border border-outline-variant/60"
+              title="View full audit log, sync reports, and What Changed diffs"
+            >
+              <span className="material-symbols-outlined text-sm text-secondary">difference</span>
+              Sync & Audit
+            </button>
+
             <button
               onClick={() => setIsGapRadarOpen(true)}
-              className="px-3.5 py-2 bg-surface-container-high hover:bg-surface-container text-on-surface rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors border border-outline-variant/60"
+              className="px-3 py-2 bg-surface-container-high hover:bg-surface-container text-on-surface rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors border border-outline-variant/60"
             >
               <span className="material-symbols-outlined text-sm text-primary">radar</span>
               Skill Gap Radar
             </button>
+
             <button
               onClick={() => setIsProfileModalOpen(true)}
-              className="px-3.5 py-2 bg-surface-container-high hover:bg-surface-container text-on-surface rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors border border-outline-variant/60"
+              className="px-3 py-2 bg-surface-container-high hover:bg-surface-container text-on-surface rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors border border-outline-variant/60"
             >
               <span className="material-symbols-outlined text-sm text-primary">psychology</span>
-              My Skill Profile
+              My Profile
             </button>
           </div>
         </div>
+
+        {/* Sync Toast Feedback */}
+        {syncToast && (
+          <div
+            className={`mt-4 p-3 rounded-xl text-xs font-semibold flex items-center gap-2 border animate-fadeIn ${
+              syncToast.type === 'success'
+                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                : syncToast.type === 'error'
+                ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                : 'bg-primary/10 text-primary border-primary/30'
+            }`}
+          >
+            <span className="material-symbols-outlined text-base">
+              {syncToast.type === 'success' ? 'check_circle' : syncToast.type === 'error' ? 'error' : 'info'}
+            </span>
+            <span>{syncToast.message}</span>
+          </div>
+        )}
 
         {/* Live Metrics Chips (PRD §74) */}
         {stats && (
